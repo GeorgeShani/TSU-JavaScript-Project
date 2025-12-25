@@ -1,0 +1,33 @@
+{
+  "name": "file-manager-cli",
+  "version": "1.0.0",
+  "description": "File Manager CLI using TypeScript and Node",
+  "main": "src/cli/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "node --loader ts-node/esm src/cli/index.ts",
+    "start": "node dist/cli/index.js",
+    "build": "tsc",
+    "test": "jest"
+  },
+  "keywords": [
+    "file-manager",
+    "cli",
+    "node",
+    "typescript"
+  ],
+  "author": "georgeshani",
+  "license": "ISC",
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "inquirer": "^13.0.2"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.10.2",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

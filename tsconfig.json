@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2020", // JS version to compile to
+    "module": "ES2020", // Use ES modules
+    "moduleResolution": "node",
+    "outDir": "dist", // compiled JS files go here
+    "rootDir": "src", // source TS files
+    "strict": true, // enable all strict type checks
+    "esModuleInterop": true, // for import compatibility
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "tests"
+  ]
+}
