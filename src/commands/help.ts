@@ -16,7 +16,7 @@ export const registerHelpCommands = (registry: CommandRegistry): void => {
   const manHandler = (args: string[]): void => {
     const commandName = args[0];
 
-    if (commandName && commandName !== "man") {
+    if (commandName) {
       const command = registry.get(commandName);
 
       if (command) {
