@@ -32,7 +32,7 @@ This project was developed as part of the **JavaScript Programming** course at *
 
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/GeorgeShani/TSU-JavaScript-Project
    cd TSU-JavaScript-Project
    ```
 
