@@ -3,24 +3,31 @@
  * Returns the input string unchanged (no styling in tests)
  */
 
+// Interface for a chainable chalk-like function (interfaces allow circular references)
+interface ChalkStyleFn {
+  (str: string): string;
+  [key: string]: ChalkStyleFn;
+}
+
 // Create a chainable mock that returns the input as-is
-const createChainableStyle = (): any => {
-  const handler = {
-    get: (_target: any, prop: string) => {
+const createChainableStyle = (): ChalkStyleFn => {
+  const handler: ProxyHandler<ChalkStyleFn> = {
+    get: (_target, prop: string | symbol) => {
       if (prop === "toString" || prop === "valueOf") {
         return () => "";
       }
       // Return a function that returns the input unchanged
       const fn = (str: string) => str;
       // Make it chainable
-      return new Proxy(fn, handler);
+      return new Proxy(fn as ChalkStyleFn, handler);
     },
-    apply: (_target: any, _thisArg: any, args: any[]) => {
+    apply: (_target, _thisArg, args: unknown[]) => {
       return args[0];
     },
   };
 
-  return new Proxy(((str: string) => str) as any, handler);
+  const baseFn = (str: string): string => str;
+  return new Proxy(baseFn as ChalkStyleFn, handler);
 };
 
 // Create the mock chalk object
