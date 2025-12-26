@@ -22,6 +22,7 @@ export class CLI {
   private registry: CommandRegistry;
   private rl: readline.Interface | null = null;
   private isRunning: boolean = false;
+  private isPrompting: boolean = false;
 
   constructor(username: string = "Anonymous") {
     this.fileManager = new FileManager(username);
@@ -98,12 +99,23 @@ ${styles.dim("Type")} ${styles.command("'man'")} ${styles.dim("for help,")} ${st
   }
 
   private setupEventHandlers(): void {
+    this.setupReadlineHandlers();
+    this.setupKeyboardShortcuts();
+  }
+
+  private setupReadlineHandlers(): void {
     if (!this.rl) return;
 
     // Handle each line of user input
     this.rl.on("line", async (input: string) => {
+      // Ignore input while confirmation prompt is active
+      if (this.isPrompting) {
+        return;
+      }
       await this.handleInput(input.trim());
-      this.showPrompt();
+      if (!this.isPrompting) {
+        this.showPrompt();
+      }
     });
 
     // Handle Ctrl+C to exit gracefully
@@ -111,24 +123,26 @@ ${styles.dim("Type")} ${styles.command("'man'")} ${styles.dim("for help,")} ${st
       this.exit();
     });
 
-    // Update state when readline closes
+    // Update state when readline closes (only if not prompting)
     this.rl.on("close", () => {
-      this.isRunning = false;
+      if (!this.isPrompting) {
+        this.isRunning = false;
+      }
     });
+  }
 
+  private setupKeyboardShortcuts(): void {
     // Enable raw mode for detecting special key combinations
-    if (process.stdin.isTTY) {
+    if (process.stdin.isTTY && !process.stdin.isRaw) {
       process.stdin.setRawMode(true);
       process.stdin.resume();
       
-      const originalHandler = this.rl;
-      
       // Handle Ctrl+L to clear screen
       process.stdin.on("keypress", (_chunk: string, key: readline.Key) => {
-        if (key && key.ctrl && key.name === "l") {
+        if (key && key.ctrl && key.name === "l" && !this.isPrompting) {
           console.clear();
           printCurrentDir();
-          originalHandler.prompt();
+          this.rl?.prompt();
         }
       });
     }
@@ -175,8 +189,11 @@ ${styles.dim("Type")} ${styles.command("'man'")} ${styles.dim("for help,")} ${st
   }
 
   private async confirmAction(message: string): Promise<boolean> {
-    // Pause readline to prevent input conflicts with inquirer
-    this.rl?.pause();
+    this.isPrompting = true;
+    
+    // Close readline completely to avoid input conflicts with inquirer
+    this.rl?.close();
+    this.rl = null;
 
     try {
       const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([
@@ -190,8 +207,17 @@ ${styles.dim("Type")} ${styles.command("'man'")} ${styles.dim("for help,")} ${st
 
       return confirmed;
     } finally {
-      // Resume readline after prompt completes
-      this.rl?.resume();
+      // Recreate readline interface after inquirer completes
+      this.rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        prompt: PROMPT_CHAR,
+      });
+      
+      // Re-setup only readline handlers (keyboard shortcuts are already set up)
+      this.setupReadlineHandlers();
+      
+      this.isPrompting = false;
     }
   }
 
