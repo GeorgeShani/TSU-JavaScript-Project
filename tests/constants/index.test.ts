@@ -25,7 +25,7 @@ describe("Constants", () => {
     });
 
     it("should have app version defined", () => {
-      expect(APP_VERSION).toBe("1.0.0");
+      expect(APP_VERSION).toBe("1.1.0");
     });
 
     it("should have prompt character defined", () => {

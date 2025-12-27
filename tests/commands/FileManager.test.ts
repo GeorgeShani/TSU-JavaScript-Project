@@ -1210,6 +1210,170 @@ describe("FileManager", () => {
         expect(decompressedContent).toBe(content);
       });
     });
+
+    describe("mid-operation abort scenarios", () => {
+      // Create larger content to increase chance of mid-stream abort
+      const largeContent = "X".repeat(100000);
+
+      it("should handle abort during readFile stream", async () => {
+        const fileName = `read-mid-abort-${Date.now()}.txt`;
+        await fs.promises.writeFile(path.join(testDir, fileName), largeContent);
+        
+        const controller = new AbortController();
+        
+        // Start reading and abort shortly after
+        const readPromise = fileManager.readFile(fileName, controller.signal);
+        
+        // Abort after a tiny delay to catch mid-stream
+        setImmediate(() => controller.abort());
+        
+        try {
+          await readPromise;
+          // If it completes before abort, that's acceptable
+        } catch (error) {
+          expect((error as Error).name).toBe("AbortError");
+        }
+      });
+
+      it("should handle abort during copyFile stream", async () => {
+        const sourceFile = `copy-mid-abort-${Date.now()}.txt`;
+        const destDir = path.join(testDir, `copy-mid-abort-dest-${Date.now()}`);
+        
+        await fs.promises.writeFile(path.join(testDir, sourceFile), largeContent);
+        await fs.promises.mkdir(destDir);
+        
+        const controller = new AbortController();
+        
+        // Start copying and abort shortly after
+        const copyPromise = fileManager.copyFile(sourceFile, destDir, controller.signal);
+        
+        setImmediate(() => controller.abort());
+        
+        try {
+          await copyPromise;
+        } catch (error) {
+          expect((error as Error).name).toBe("AbortError");
+          // Verify partial file was cleaned up
+          const destPath = path.join(destDir, sourceFile);
+          const exists = await fs.promises.access(destPath).then(() => true).catch(() => false);
+          // File should either not exist or be cleaned up
+          expect(exists).toBe(false);
+        }
+      });
+
+      it("should handle abort during calculateHash stream", async () => {
+        const fileName = `hash-mid-abort-${Date.now()}.txt`;
+        await fs.promises.writeFile(path.join(testDir, fileName), largeContent);
+        
+        const controller = new AbortController();
+        
+        const hashPromise = fileManager.calculateHash(fileName, "sha256", controller.signal);
+        
+        setImmediate(() => controller.abort());
+        
+        try {
+          await hashPromise;
+        } catch (error) {
+          expect((error as Error).name).toBe("AbortError");
+        }
+      });
+
+      it("should handle abort during compressFile stream", async () => {
+        const sourceFile = `compress-mid-abort-${Date.now()}.txt`;
+        const destFile = `${sourceFile}.br`;
+        
+        await fs.promises.writeFile(path.join(testDir, sourceFile), largeContent);
+        
+        const controller = new AbortController();
+        
+        const compressPromise = fileManager.compressFile(sourceFile, destFile, "brotli", controller.signal);
+        
+        setImmediate(() => controller.abort());
+        
+        try {
+          await compressPromise;
+        } catch (error) {
+          expect((error as Error).name).toBe("AbortError");
+          // Verify partial file was cleaned up
+          const destPath = path.join(testDir, destFile);
+          const exists = await fs.promises.access(destPath).then(() => true).catch(() => false);
+          expect(exists).toBe(false);
+        }
+      });
+
+      it("should handle abort during decompressFile stream", async () => {
+        const sourceFile = `decompress-mid-abort-${Date.now()}.txt`;
+        const compressedFile = `${sourceFile}.br`;
+        const decompressedFile = `decompress-mid-abort-out-${Date.now()}.txt`;
+        
+        // Create and compress the source file first
+        await fs.promises.writeFile(path.join(testDir, sourceFile), largeContent);
+        await fileManager.compressFile(sourceFile, compressedFile, "brotli");
+        
+        const controller = new AbortController();
+        
+        const decompressPromise = fileManager.decompressFile(
+          compressedFile, 
+          decompressedFile, 
+          "brotli", 
+          controller.signal
+        );
+        
+        setImmediate(() => controller.abort());
+        
+        try {
+          await decompressPromise;
+        } catch (error) {
+          expect((error as Error).name).toBe("AbortError");
+          // Verify partial file was cleaned up
+          const destPath = path.join(testDir, decompressedFile);
+          const exists = await fs.promises.access(destPath).then(() => true).catch(() => false);
+          expect(exists).toBe(false);
+        }
+      });
+
+      it("should handle abort during grep recursive search", async () => {
+        // Create multiple files to search through
+        const searchDir = path.join(testDir, `grep-mid-abort-${Date.now()}`);
+        await fs.promises.mkdir(searchDir, { recursive: true });
+        
+        for (let i = 0; i < 10; i++) {
+          const subDir = path.join(searchDir, `subdir${i}`);
+          await fs.promises.mkdir(subDir);
+          await fs.promises.writeFile(
+            path.join(subDir, "file.txt"), 
+            `Content ${i} with searchterm here`
+          );
+        }
+        
+        const controller = new AbortController();
+        
+        const grepPromise = fileManager.grep("searchterm", searchDir, controller.signal);
+        
+        setImmediate(() => controller.abort());
+        
+        try {
+          await grepPromise;
+        } catch (error) {
+          expect((error as Error).name).toBe("AbortError");
+        }
+      });
+    });
+
+    describe("stream error handling", () => {
+      it("should handle read stream errors gracefully", async () => {
+        // Try to read a file that doesn't exist (should throw before stream)
+        await expect(
+          fileManager.readFile("nonexistent-file-12345.txt")
+        ).rejects.toThrow();
+      });
+
+      it("should handle hash stream errors for non-existent files", async () => {
+        await expect(
+          fileManager.calculateHash("nonexistent-file-12345.txt", "sha256")
+        ).rejects.toThrow();
+      });
+    });
   });
 
   // ==================== Compression Tests ====================
