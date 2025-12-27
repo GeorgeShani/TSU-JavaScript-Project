@@ -133,14 +133,15 @@ ${styles.dim("Type")} ${styles.command("'man'")} ${styles.dim("for help,")} ${st
 
   private setupKeyboardShortcuts(): void {
     // Enable raw mode for detecting special key combinations
-    if (process.stdin.isTTY && !process.stdin.isRaw) {
-      process.stdin.setRawMode(true);
-      process.stdin.resume();
+    if (process.stdin.isTTY) {
+      // Enable keypress events to be emitted on stdin
+      readline.emitKeypressEvents(process.stdin);
       
       // Handle Ctrl+L to clear screen
       process.stdin.on("keypress", (_chunk: string, key: readline.Key) => {
         if (key && key.ctrl && key.name === "l" && !this.isPrompting) {
-          console.clear();
+          // Clear line first to avoid visual artifacts
+          process.stdout.write("\x1b[2J\x1b[H");
           printCurrentDir();
           this.rl?.prompt();
         }
