@@ -27,7 +27,7 @@ export const registerCompressionCommands = (
     category: "compression",
   };
 
-  const compressHandler = async (args: string[]): Promise<void> => {
+  const compressHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) {
       throw new Error(MESSAGES.errors.missingArgument("source path"));
     }
@@ -49,7 +49,7 @@ export const registerCompressionCommands = (
       `${styles.info("Compressing")} ${styles.path(sourcePath)} ${styles.dim("using")} ${styles.highlight(algorithm)}...`
     );
 
-    const result = await fileManager.compressFile(sourcePath, destPath, algorithm);
+    const result = await fileManager.compressFile(sourcePath, destPath, algorithm, signal);
 
     const ratio = ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1);
 
@@ -74,7 +74,7 @@ export const registerCompressionCommands = (
     category: "compression",
   };
 
-  const decompressHandler = async (args: string[]): Promise<void> => {
+  const decompressHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) {
       throw new Error(MESSAGES.errors.missingArgument("source path"));
     }
@@ -110,7 +110,7 @@ export const registerCompressionCommands = (
       `${styles.info("Decompressing")} ${styles.path(sourcePath)} ${styles.dim("using")} ${styles.highlight(algorithm)}...`
     );
 
-    await fileManager.decompressFile(sourcePath, destPath, algorithm);
+    await fileManager.decompressFile(sourcePath, destPath, algorithm, signal);
     console.log(MESSAGES.success.decompressed(sourcePath, destPath));
   };
 
@@ -124,12 +124,12 @@ export const registerCompressionCommands = (
     category: "compression",
   };
 
-  const brotliHandler = async (args: string[]): Promise<void> => {
+  const brotliHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) throw new Error(MESSAGES.errors.missingArgument("source path"));
     if (!args[1]) throw new Error(MESSAGES.errors.missingArgument("destination path"));
 
     console.log(`${styles.info("Compressing with Brotli")} ${styles.path(args[0])}...`);
-    const result = await fileManager.compressFile(args[0], args[1], "brotli");
+    const result = await fileManager.compressFile(args[0], args[1], "brotli", signal);
     const ratio = ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1);
     console.log(
       `${styles.success("Done!")} ${styles.size(formatBytes(result.originalSize))} -> ` +
@@ -147,12 +147,12 @@ export const registerCompressionCommands = (
     category: "compression",
   };
 
-  const gzipHandler = async (args: string[]): Promise<void> => {
+  const gzipHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) throw new Error(MESSAGES.errors.missingArgument("source path"));
     if (!args[1]) throw new Error(MESSAGES.errors.missingArgument("destination path"));
 
     console.log(`${styles.info("Compressing with Gzip")} ${styles.path(args[0])}...`);
-    const result = await fileManager.compressFile(args[0], args[1], "gzip");
+    const result = await fileManager.compressFile(args[0], args[1], "gzip", signal);
     const ratio = ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1);
     console.log(
       `${styles.success("Done!")} ${styles.size(formatBytes(result.originalSize))} -> ` +
@@ -170,12 +170,12 @@ export const registerCompressionCommands = (
     category: "compression",
   };
 
-  const deflateHandler = async (args: string[]): Promise<void> => {
+  const deflateHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) throw new Error(MESSAGES.errors.missingArgument("source path"));
     if (!args[1]) throw new Error(MESSAGES.errors.missingArgument("destination path"));
 
     console.log(`${styles.info("Compressing with Deflate")} ${styles.path(args[0])}...`);
-    const result = await fileManager.compressFile(args[0], args[1], "deflate");
+    const result = await fileManager.compressFile(args[0], args[1], "deflate", signal);
     const ratio = ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1);
     console.log(
       `${styles.success("Done!")} ${styles.size(formatBytes(result.originalSize))} -> ` +
@@ -193,12 +193,12 @@ export const registerCompressionCommands = (
     category: "compression",
   };
 
-  const gunzipHandler = async (args: string[]): Promise<void> => {
+  const gunzipHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) throw new Error(MESSAGES.errors.missingArgument("source path"));
     if (!args[1]) throw new Error(MESSAGES.errors.missingArgument("destination path"));
 
     console.log(`${styles.info("Decompressing Gzip")} ${styles.path(args[0])}...`);
-    await fileManager.decompressFile(args[0], args[1], "gzip");
+    await fileManager.decompressFile(args[0], args[1], "gzip", signal);
     console.log(MESSAGES.success.decompressed(args[0], args[1]));
   };
 
@@ -212,12 +212,12 @@ export const registerCompressionCommands = (
     category: "compression",
   };
 
-  const unbrotliHandler = async (args: string[]): Promise<void> => {
+  const unbrotliHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) throw new Error(MESSAGES.errors.missingArgument("source path"));
     if (!args[1]) throw new Error(MESSAGES.errors.missingArgument("destination path"));
 
     console.log(`${styles.info("Decompressing Brotli")} ${styles.path(args[0])}...`);
-    await fileManager.decompressFile(args[0], args[1], "brotli");
+    await fileManager.decompressFile(args[0], args[1], "brotli", signal);
     console.log(MESSAGES.success.decompressed(args[0], args[1]));
   };
 
@@ -231,12 +231,12 @@ export const registerCompressionCommands = (
     category: "compression",
   };
 
-  const inflateHandler = async (args: string[]): Promise<void> => {
+  const inflateHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) throw new Error(MESSAGES.errors.missingArgument("source path"));
     if (!args[1]) throw new Error(MESSAGES.errors.missingArgument("destination path"));
 
     console.log(`${styles.info("Decompressing Deflate")} ${styles.path(args[0])}...`);
-    await fileManager.decompressFile(args[0], args[1], "deflate");
+    await fileManager.decompressFile(args[0], args[1], "deflate", signal);
     console.log(MESSAGES.success.decompressed(args[0], args[1]));
   };
 

@@ -18,7 +18,7 @@ export const registerHashCommands = (
     category: "hash",
   };
 
-  const hashHandler = async (args: string[]): Promise<void> => {
+  const hashHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) {
       throw new Error(MESSAGES.errors.missingArgument("file path"));
     }
@@ -33,7 +33,7 @@ export const registerHashCommands = (
     }
 
     console.log(styles.info("Calculating hash..."));
-    const result = await fileManager.calculateHash(filePath, algorithm);
+    const result = await fileManager.calculateHash(filePath, algorithm, signal);
 
     console.log();
     console.log(`${styles.bold("File:")}      ${styles.path(result.filePath)}`);
@@ -52,12 +52,12 @@ export const registerHashCommands = (
     category: "hash",
   };
 
-  const md5Handler = async (args: string[]): Promise<void> => {
+  const md5Handler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) {
       throw new Error(MESSAGES.errors.missingArgument("file path"));
     }
 
-    const result = await fileManager.calculateHash(args[0], "md5");
+    const result = await fileManager.calculateHash(args[0], "md5", signal);
     console.log(`${styles.info("MD5:")} ${styles.success(result.hash)}`);
   };
 
@@ -71,12 +71,12 @@ export const registerHashCommands = (
     category: "hash",
   };
 
-  const sha256Handler = async (args: string[]): Promise<void> => {
+  const sha256Handler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) {
       throw new Error(MESSAGES.errors.missingArgument("file path"));
     }
 
-    const result = await fileManager.calculateHash(args[0], "sha256");
+    const result = await fileManager.calculateHash(args[0], "sha256", signal);
     console.log(`${styles.info("SHA-256:")} ${styles.success(result.hash)}`);
   };
 
@@ -92,12 +92,12 @@ export const registerHashCommands = (
     category: "hash",
   };
 
-  const sha512Handler = async (args: string[]): Promise<void> => {
+  const sha512Handler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) {
       throw new Error(MESSAGES.errors.missingArgument("file path"));
     }
 
-    const result = await fileManager.calculateHash(args[0], "sha512");
+    const result = await fileManager.calculateHash(args[0], "sha512", signal);
     console.log(`${styles.info("SHA-512:")} ${styles.success(result.hash)}`);
   };
 
@@ -113,12 +113,12 @@ export const registerHashCommands = (
     category: "hash",
   };
 
-  const sha1Handler = async (args: string[]): Promise<void> => {
+  const sha1Handler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) {
       throw new Error(MESSAGES.errors.missingArgument("file path"));
     }
 
-    const result = await fileManager.calculateHash(args[0], "sha1");
+    const result = await fileManager.calculateHash(args[0], "sha1", signal);
     console.log(`${styles.info("SHA-1:")} ${styles.success(result.hash)}`);
   };
 

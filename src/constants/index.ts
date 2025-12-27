@@ -1,7 +1,7 @@
 import chalk from "chalk";
 
 export const APP_NAME = "File Manager CLI";
-export const APP_VERSION = "1.0.0";
+export const APP_VERSION = "1.1.0";
 
 export const styles = {
   success: chalk.green,
@@ -105,6 +105,8 @@ export const MESSAGES = {
     noMatches: styles.warning("No matches found."),
     emptyDirectory: styles.dim("Directory is empty."),
     operationCancelled: styles.warning("Operation cancelled."),
+    interruptHint: styles.warning("Press Ctrl+C again to exit."),
+    taskInterrupted: styles.warning("Task interrupted."),
   },
 } as const;
 

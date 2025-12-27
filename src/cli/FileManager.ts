@@ -126,7 +126,7 @@ export class FileManager {
     return process.cwd();
   }
 
-  async readFile(filePath: string): Promise<string> {
+  async readFile(filePath: string, signal?: AbortSignal): Promise<string> {
     const resolvedPath = resolveFilePath(filePath);
 
     if (!(await fileExists(resolvedPath))) {
@@ -138,6 +138,19 @@ export class FileManager {
       const chunks: Buffer[] = [];
       const readStream = createReadStream(resolvedPath);
 
+      // Handle abort signal
+      const onAbort = () => {
+        readStream.destroy();
+        reject(new DOMException("Operation aborted", "AbortError"));
+      };
+
+      if (signal?.aborted) {
+        reject(new DOMException("Operation aborted", "AbortError"));
+        return;
+      }
+
+      signal?.addEventListener("abort", onAbort, { once: true });
+
       // Collect data chunks as they arrive
       readStream.on("data", (chunk: Buffer | string) => {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -145,10 +158,14 @@ export class FileManager {
 
       // Concatenate all chunks when stream ends
       readStream.on("end", () => {
+        signal?.removeEventListener("abort", onAbort);
         resolve(Buffer.concat(chunks).toString("utf-8"));
       });
 
-      readStream.on("error", reject);
+      readStream.on("error", (err) => {
+        signal?.removeEventListener("abort", onAbort);
+        reject(err);
+      });
     });
   }
 
@@ -216,9 +233,13 @@ export class FileManager {
     await fs.promises.rename(sourcePath, destPath);
   }
 
-  async copyFile(sourcePath: string, destDirPath: string): Promise<string> {
+  async copyFile(sourcePath: string, destDirPath: string, signal?: AbortSignal): Promise<string> {
     const resolvedSource = resolveFilePath(sourcePath);
     const resolvedDestDir = resolveFilePath(destDirPath);
+
+    if (signal?.aborted) {
+      throw new DOMException("Operation aborted", "AbortError");
+    }
 
     if (!(await fileExists(resolvedSource))) {
       throw new Error(MESSAGES.errors.fileNotFound(sourcePath));
@@ -239,13 +260,40 @@ export class FileManager {
     const readStream = createReadStream(resolvedSource);
     const writeStream = createWriteStream(destPath);
 
-    await pipeline(readStream, writeStream);
+    // Handle abort signal
+    if (signal) {
+      const onAbort = () => {
+        readStream.destroy();
+        writeStream.destroy();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      
+      try {
+        await pipeline(readStream, writeStream, { signal });
+      } catch (error) {
+        // Clean up partially written file on abort
+        if (signal.aborted) {
+          try {
+            await fs.promises.unlink(destPath);
+          } catch {
+            // Ignore cleanup errors
+          }
+          throw new DOMException("Operation aborted", "AbortError");
+        }
+        throw error;
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+      }
+    } else {
+      await pipeline(readStream, writeStream);
+    }
+
     return destPath;
   }
 
-  async moveFile(sourcePath: string, destDirPath: string): Promise<string> {
+  async moveFile(sourcePath: string, destDirPath: string, signal?: AbortSignal): Promise<string> {
     // Move = copy + delete original
-    const destPath = await this.copyFile(sourcePath, destDirPath);
+    const destPath = await this.copyFile(sourcePath, destDirPath, signal);
     await this.deleteFile(sourcePath);
     return destPath;
   }
@@ -274,7 +322,8 @@ export class FileManager {
 
   async findFiles(
     pattern: string,
-    searchPath?: string
+    searchPath?: string,
+    signal?: AbortSignal
   ): Promise<SearchResult[]> {
     const basePath = searchPath ? resolveFilePath(searchPath) : process.cwd();
     const results: SearchResult[] = [];
@@ -286,19 +335,30 @@ export class FileManager {
       .replace(/\?/g, ".");
     const regex = new RegExp(regexPattern, "i");
 
-    await this.searchRecursive(basePath, regex, results);
+    await this.searchRecursive(basePath, regex, results, signal);
     return results;
   }
 
   private async searchRecursive(
     dirPath: string,
     pattern: RegExp,
-    results: SearchResult[]
+    results: SearchResult[],
+    signal?: AbortSignal
   ): Promise<void> {
     try {
+      // Check if operation was aborted
+      if (signal?.aborted) {
+        throw new DOMException("Operation aborted", "AbortError");
+      }
+
       const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
 
       for (const entry of entries) {
+        // Check if operation was aborted before processing each entry
+        if (signal?.aborted) {
+          throw new DOMException("Operation aborted", "AbortError");
+        }
+
         const fullPath = joinPaths(dirPath, entry.name);
 
         // Check if name matches pattern
@@ -312,15 +372,19 @@ export class FileManager {
 
         // Recurse into subdirectories
         if (entry.isDirectory()) {
-          await this.searchRecursive(fullPath, pattern, results);
+          await this.searchRecursive(fullPath, pattern, results, signal);
         }
       }
-    } catch {
+    } catch (error) {
+      // Re-throw AbortError
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw error;
+      }
       // Skip directories we can't access (permission denied, etc.)
     }
   }
 
-  async grep(searchPattern: string, filePath: string): Promise<SearchResult[]> {
+  async grep(searchPattern: string, filePath: string, signal?: AbortSignal): Promise<SearchResult[]> {
     const resolvedPath = resolveFilePath(filePath);
     const results: SearchResult[] = [];
     // Case-insensitive, global match
@@ -342,7 +406,7 @@ export class FileManager {
         });
       }
     } else if (stats.isDirectory()) {
-      await this.grepRecursive(resolvedPath, regex, results);
+      await this.grepRecursive(resolvedPath, regex, results, signal);
     }
 
     return results;
@@ -374,12 +438,23 @@ export class FileManager {
   private async grepRecursive(
     dirPath: string,
     pattern: RegExp,
-    results: SearchResult[]
+    results: SearchResult[],
+    signal?: AbortSignal
   ): Promise<void> {
     try {
+      // Check if operation was aborted
+      if (signal?.aborted) {
+        throw new DOMException("Operation aborted", "AbortError");
+      }
+
       const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
 
       for (const entry of entries) {
+        // Check if operation was aborted before processing each entry
+        if (signal?.aborted) {
+          throw new DOMException("Operation aborted", "AbortError");
+        }
+
         const fullPath = joinPaths(dirPath, entry.name);
 
         if (entry.isFile()) {
@@ -393,19 +468,28 @@ export class FileManager {
             });
           }
         } else if (entry.isDirectory()) {
-          await this.grepRecursive(fullPath, pattern, results);
+          await this.grepRecursive(fullPath, pattern, results, signal);
         }
       }
-    } catch {
+    } catch (error) {
+      // Re-throw AbortError
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw error;
+      }
       // Skip directories we can't access
     }
   }
 
   async calculateHash(
     filePath: string,
-    algorithm: string = "sha256"
+    algorithm: string = "sha256",
+    signal?: AbortSignal
   ): Promise<HashResult> {
     const resolvedPath = resolveFilePath(filePath);
+
+    if (signal?.aborted) {
+      throw new DOMException("Operation aborted", "AbortError");
+    }
 
     if (!(await fileExists(resolvedPath))) {
       throw new Error(MESSAGES.errors.fileNotFound(filePath));
@@ -415,6 +499,14 @@ export class FileManager {
       const hash = crypto.createHash(algorithm);
       const fileStream = createReadStream(resolvedPath);
 
+      // Handle abort signal
+      const onAbort = () => {
+        fileStream.destroy();
+        reject(new DOMException("Operation aborted", "AbortError"));
+      };
+
+      signal?.addEventListener("abort", onAbort, { once: true });
+
       // Feed file data into hash incrementally
       fileStream.on("data", (chunk) => {
         hash.update(chunk);
@@ -422,6 +514,7 @@ export class FileManager {
 
       // Finalize hash when file is fully read
       fileStream.on("end", () => {
+        signal?.removeEventListener("abort", onAbort);
         resolve({
           algorithm,
           hash: hash.digest("hex"),
@@ -429,17 +522,25 @@ export class FileManager {
         });
       });
 
-      fileStream.on("error", reject);
+      fileStream.on("error", (err) => {
+        signal?.removeEventListener("abort", onAbort);
+        reject(err);
+      });
     });
   }
 
   async compressFile(
     sourcePath: string,
     destPath: string,
-    algorithm: "brotli" | "gzip" | "deflate" = "brotli"
+    algorithm: "brotli" | "gzip" | "deflate" = "brotli",
+    signal?: AbortSignal
   ): Promise<{ originalSize: number; compressedSize: number }> {
     const resolvedSource = resolveFilePath(sourcePath);
     const resolvedDest = resolveFilePath(destPath);
+
+    if (signal?.aborted) {
+      throw new DOMException("Operation aborted", "AbortError");
+    }
 
     if (!(await fileExists(resolvedSource))) {
       throw new Error(MESSAGES.errors.fileNotFound(sourcePath));
@@ -454,8 +555,33 @@ export class FileManager {
     const readStream = createReadStream(resolvedSource);
     const writeStream = createWriteStream(resolvedDest);
 
-    // Pipe: read -> compress -> write
-    await pipeline(readStream, compressionStream, writeStream);
+    // Handle abort signal
+    if (signal) {
+      const onAbort = () => {
+        readStream.destroy();
+        writeStream.destroy();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      
+      try {
+        await pipeline(readStream, compressionStream, writeStream, { signal });
+      } catch (error) {
+        // Clean up partially written file on abort
+        if (signal.aborted) {
+          try {
+            await fs.promises.unlink(resolvedDest);
+          } catch {
+            // Ignore cleanup errors
+          }
+          throw new DOMException("Operation aborted", "AbortError");
+        }
+        throw error;
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+      }
+    } else {
+      await pipeline(readStream, compressionStream, writeStream);
+    }
 
     const destStats = await fs.promises.stat(resolvedDest);
     const compressedSize = destStats.size;
@@ -466,10 +592,15 @@ export class FileManager {
   async decompressFile(
     sourcePath: string,
     destPath: string,
-    algorithm: "brotli" | "gzip" | "deflate" = "brotli"
+    algorithm: "brotli" | "gzip" | "deflate" = "brotli",
+    signal?: AbortSignal
   ): Promise<void> {
     const resolvedSource = resolveFilePath(sourcePath);
     const resolvedDest = resolveFilePath(destPath);
+
+    if (signal?.aborted) {
+      throw new DOMException("Operation aborted", "AbortError");
+    }
 
     if (!(await fileExists(resolvedSource))) {
       throw new Error(MESSAGES.errors.fileNotFound(sourcePath));
@@ -481,8 +612,33 @@ export class FileManager {
     const readStream = createReadStream(resolvedSource);
     const writeStream = createWriteStream(resolvedDest);
 
-    // Pipe: read -> decompress -> write
-    await pipeline(readStream, decompressionStream, writeStream);
+    // Handle abort signal
+    if (signal) {
+      const onAbort = () => {
+        readStream.destroy();
+        writeStream.destroy();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      
+      try {
+        await pipeline(readStream, decompressionStream, writeStream, { signal });
+      } catch (error) {
+        // Clean up partially written file on abort
+        if (signal.aborted) {
+          try {
+            await fs.promises.unlink(resolvedDest);
+          } catch {
+            // Ignore cleanup errors
+          }
+          throw new DOMException("Operation aborted", "AbortError");
+        }
+        throw error;
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+      }
+    } else {
+      await pipeline(readStream, decompressionStream, writeStream);
+    }
   }
 
   // Factory method for compression streams

@@ -18,7 +18,7 @@ export const registerSearchCommands = (
     category: "search",
   };
 
-  const findHandler = async (args: string[]): Promise<void> => {
+  const findHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) {
       throw new Error(MESSAGES.errors.missingArgument("pattern"));
     }
@@ -27,7 +27,7 @@ export const registerSearchCommands = (
     const searchPath = args[1];
 
     console.log(MESSAGES.info.searching(pattern));
-    const results = await fileManager.findFiles(pattern, searchPath);
+    const results = await fileManager.findFiles(pattern, searchPath, signal);
 
     if (results.length === 0) {
       console.log(MESSAGES.info.noMatches);
@@ -71,7 +71,7 @@ export const registerSearchCommands = (
     category: "search",
   };
 
-  const grepHandler = async (args: string[]): Promise<void> => {
+  const grepHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) {
       throw new Error(MESSAGES.errors.missingArgument("search pattern"));
     }
@@ -85,7 +85,7 @@ export const registerSearchCommands = (
     console.log(
       `${styles.info("Searching for")} ${styles.highlight(`"${pattern}"`)} ${styles.info("in")} ${styles.path(searchPath)}...`
     );
-    const results = await fileManager.grep(pattern, searchPath);
+    const results = await fileManager.grep(pattern, searchPath, signal);
 
     if (results.length === 0) {
       console.log(MESSAGES.info.noMatches);
@@ -136,14 +136,14 @@ export const registerSearchCommands = (
     category: "search",
   };
 
-  const whereHandler = async (args: string[]): Promise<void> => {
+  const whereHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) {
       throw new Error(MESSAGES.errors.missingArgument("search text"));
     }
 
     console.log(MESSAGES.info.searching(args[0]));
 
-    const results = await fileManager.grep(args[0], ".");
+    const results = await fileManager.grep(args[0], ".", signal);
 
     if (results.length === 0) {
       console.log(

@@ -1,4 +1,4 @@
-export type CommandHandler = (args: string[]) => Promise<void> | void;
+export type CommandHandler = (args: string[], signal?: AbortSignal) => Promise<void> | void;
 
 export interface CommandDoc {
   description: string;

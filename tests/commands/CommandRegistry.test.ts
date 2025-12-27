@@ -163,7 +163,7 @@ describe("CommandRegistry", () => {
         registry.register("test", mockHandler, sampleDoc);
         await registry.execute("test", ["arg1", "arg2"]);
         
-        expect(mockHandler).toHaveBeenCalledWith(["arg1", "arg2"]);
+        expect(mockHandler).toHaveBeenCalledWith(["arg1", "arg2"], undefined);
       });
 
       it("should execute command by alias", async () => {
@@ -171,7 +171,16 @@ describe("CommandRegistry", () => {
         registry.registerAlias("t", "test");
         
         await registry.execute("t", ["arg"]);
-        expect(mockHandler).toHaveBeenCalledWith(["arg"]);
+        expect(mockHandler).toHaveBeenCalledWith(["arg"], undefined);
+      });
+
+      it("should pass AbortSignal to handler", async () => {
+        registry.register("test", mockHandler, sampleDoc);
+        const controller = new AbortController();
+        
+        await registry.execute("test", ["arg"], controller.signal);
+        
+        expect(mockHandler).toHaveBeenCalledWith(["arg"], controller.signal);
       });
 
       it("should handle async handlers", async () => {
@@ -232,6 +241,50 @@ describe("CommandRegistry", () => {
 
     it("should return empty array for empty registry", () => {
       expect(registry.getCommandNames()).toEqual([]);
+    });
+  });
+
+  // ==================== GetAliasesForCommand Tests ====================
+  describe("getAliasesForCommand", () => {
+    it("should return all aliases for a command", () => {
+      registry.register("test", mockHandler, sampleDoc);
+      registry.registerAlias("t", "test");
+      registry.registerAlias("tst", "test");
+      registry.registerAlias("testing", "test");
+      
+      const aliases = registry.getAliasesForCommand("test");
+      
+      expect(aliases).toContain("t");
+      expect(aliases).toContain("tst");
+      expect(aliases).toContain("testing");
+      expect(aliases.length).toBe(3);
+    });
+
+    it("should return empty array for command with no aliases", () => {
+      registry.register("test", mockHandler, sampleDoc);
+      
+      const aliases = registry.getAliasesForCommand("test");
+      
+      expect(aliases).toEqual([]);
+    });
+
+    it("should return empty array for non-existent command", () => {
+      const aliases = registry.getAliasesForCommand("nonexistent");
+      
+      expect(aliases).toEqual([]);
+    });
+
+    it("should only return aliases for specified command", () => {
+      registry.register("cmd1", mockHandler, sampleDoc);
+      registry.register("cmd2", mockHandler, sampleDoc);
+      registry.registerAlias("c1", "cmd1");
+      registry.registerAlias("c2", "cmd2");
+      
+      const aliases = registry.getAliasesForCommand("cmd1");
+      
+      expect(aliases).toContain("c1");
+      expect(aliases).not.toContain("c2");
+      expect(aliases.length).toBe(1);
     });
   });
 

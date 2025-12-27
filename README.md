@@ -258,8 +258,22 @@ General utility commands for the CLI.
 - `exit`, `quit`, `q` → `.exit`
 
 **Keyboard Shortcuts:**
-- `Ctrl + C` - Exit the program
+- `Ctrl + C` - Interrupt current task / Press twice to exit
 - `Ctrl + L` - Clear the screen
+
+**Task Interruption:**
+
+Long-running operations can be interrupted by pressing `Ctrl+C`. This includes:
+- File searches (`find`, `grep`, `where`)
+- File reading (`cat`)
+- File copying/moving (`cp`, `move`)
+- Hash calculations (`hash`, `md5`, `sha256`, etc.)
+- Compression/decompression operations
+
+When you press `Ctrl+C`:
+- **During a task:** The operation is immediately cancelled and you return to the prompt
+- **At the prompt:** Shows "Press Ctrl+C again to exit"
+- **Twice quickly:** Exits the application
 
 **Example:**
 ```
@@ -316,6 +330,10 @@ General utility commands for the CLI.
 - **Command Pattern** - Encapsulating commands as objects
 - **Factory Pattern** - Creating compression/decompression streams
 - **Facade Pattern** - Simplified interface over complex subsystems
+
+### Async Patterns
+- **AbortController/AbortSignal** - Task cancellation for long-running operations
+- **Stream Processing** - Memory-efficient file handling with Node.js streams
 
 ---
 

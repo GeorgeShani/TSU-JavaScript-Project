@@ -16,13 +16,13 @@ export const registerFileOperationCommands = (
     category: "file-operations",
   };
 
-  const catHandler = async (args: string[]): Promise<void> => {
+  const catHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) {
       throw new Error(MESSAGES.errors.missingArgument("file path"));
     }
 
     console.log(styles.dim(`--- ${args[0]} ---`));
-    const content = await fileManager.readFile(args[0]);
+    const content = await fileManager.readFile(args[0], signal);
     console.log(content);
     console.log(styles.dim("--- end ---"));
   };
@@ -146,7 +146,7 @@ export const registerFileOperationCommands = (
     category: "file-operations",
   };
 
-  const cpHandler = async (args: string[]): Promise<void> => {
+  const cpHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) {
       throw new Error(MESSAGES.errors.missingArgument("source path"));
     }
@@ -154,7 +154,7 @@ export const registerFileOperationCommands = (
       throw new Error(MESSAGES.errors.missingArgument("destination path"));
     }
 
-    const destPath = await fileManager.copyFile(args[0], args[1]);
+    const destPath = await fileManager.copyFile(args[0], args[1], signal);
     console.log(MESSAGES.success.fileCopied(args[0], destPath));
   };
 
@@ -171,7 +171,7 @@ export const registerFileOperationCommands = (
     category: "file-operations",
   };
 
-  const moveHandler = async (args: string[]): Promise<void> => {
+  const moveHandler = async (args: string[], signal?: AbortSignal): Promise<void> => {
     if (!args[0]) {
       throw new Error(MESSAGES.errors.missingArgument("source path"));
     }
@@ -179,7 +179,7 @@ export const registerFileOperationCommands = (
       throw new Error(MESSAGES.errors.missingArgument("destination path"));
     }
 
-    const destPath = await fileManager.moveFile(args[0], args[1]);
+    const destPath = await fileManager.moveFile(args[0], args[1], signal);
     console.log(MESSAGES.success.fileMoved(args[0], destPath));
   };
 

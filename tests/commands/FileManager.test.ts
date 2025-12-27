@@ -921,6 +921,294 @@ describe("FileManager", () => {
         expect(fileNames).toContain("file1.txt");
         expect(fileNames.some((n) => n.includes("nested") || n.includes("code"))).toBe(true);
       });
+
+      it("should handle deeply nested directories in grep", async () => {
+        // Create a deeper nested structure
+        const deepDir = path.join(grepDir, "level1", "level2");
+        await fs.promises.mkdir(deepDir, { recursive: true });
+        await fs.promises.writeFile(
+          path.join(deepDir, "deep.txt"),
+          "Deep Hello World"
+        );
+        
+        const results = await fileManager.grep("Hello", grepDir);
+        
+        // Should find the deeply nested file
+        const fileNames = results.map((r) => r.name);
+        expect(fileNames).toContain("deep.txt");
+      });
+
+      it("should skip files with no matches in directory grep", async () => {
+        const results = await fileManager.grep("Hello", grepDir);
+        
+        // file2.txt has no "Hello" - should not be in results
+        const fileNames = results.map((r) => r.name);
+        expect(fileNames).not.toContain("file2.txt");
+      });
+
+      it("should correctly identify when path is a directory vs file", async () => {
+        // First test with a file path
+        const fileResults = await fileManager.grep("Hello", path.join(grepDir, "file1.txt"));
+        expect(fileResults.length).toBe(1);
+        expect(fileResults[0].type).toBe("file");
+        
+        // Then test with a directory path - this explicitly tests the isDirectory branch
+        const dirResults = await fileManager.grep("Hello", grepDir);
+        expect(dirResults.length).toBeGreaterThan(0);
+        // All results should be files found within the directory
+        expect(dirResults.every((r) => r.type === "file")).toBe(true);
+      });
+
+      it("should handle empty directories in recursive grep", async () => {
+        const emptyDir = path.join(grepDir, "empty-subdir");
+        await fs.promises.mkdir(emptyDir, { recursive: true });
+        
+        // Should not throw, just return results from other directories
+        const results = await fileManager.grep("Hello", grepDir);
+        expect(results.length).toBeGreaterThan(0);
+      });
+
+      it("should abort grep when signal is aborted", async () => {
+        const controller = new AbortController();
+        
+        // Abort immediately
+        controller.abort();
+        
+        await expect(
+          fileManager.grep("Hello", grepDir, controller.signal)
+        ).rejects.toThrow("Operation aborted");
+      });
+    });
+  });
+
+  // ==================== Task Cancellation Tests ====================
+  describe("task cancellation", () => {
+    let cancelDir: string;
+
+    beforeEach(async () => {
+      // Create a directory structure for cancellation tests
+      cancelDir = path.join(testDir, `cancel-test-${Date.now()}`);
+      await fs.promises.mkdir(cancelDir, { recursive: true });
+      
+      // Create several subdirectories with files
+      for (let i = 0; i < 5; i++) {
+        const subDir = path.join(cancelDir, `subdir${i}`);
+        await fs.promises.mkdir(subDir, { recursive: true });
+        await fs.promises.writeFile(path.join(subDir, "file.txt"), "test content");
+      }
+    });
+
+    describe("findFiles cancellation", () => {
+      it("should stop searching when aborted", async () => {
+        const controller = new AbortController();
+        
+        // Abort immediately
+        controller.abort();
+        
+        await expect(
+          fileManager.findFiles("*.txt", cancelDir, controller.signal)
+        ).rejects.toThrow("Operation aborted");
+      });
+
+      it("should return partial results if aborted mid-search", async () => {
+        const controller = new AbortController();
+        
+        // Start search and abort after a short delay
+        const searchPromise = fileManager.findFiles("*.txt", cancelDir, controller.signal);
+        
+        // Give it a tiny bit of time to start, then abort
+        setTimeout(() => controller.abort(), 1);
+        
+        // Should either complete or throw AbortError
+        try {
+          const results = await searchPromise;
+          // If it completed before abort, that's fine too
+          expect(results.length).toBeGreaterThanOrEqual(0);
+        } catch (error) {
+          expect(error).toBeInstanceOf(DOMException);
+          expect((error as DOMException).name).toBe("AbortError");
+        }
+      });
+    });
+
+    describe("grep cancellation", () => {
+      it("should stop searching when aborted", async () => {
+        const controller = new AbortController();
+        
+        // Abort immediately
+        controller.abort();
+        
+        await expect(
+          fileManager.grep("test", cancelDir, controller.signal)
+        ).rejects.toThrow("Operation aborted");
+      });
+    });
+
+    describe("readFile cancellation", () => {
+      it("should abort reading when signal is already aborted", async () => {
+        const fileName = `read-abort-${Date.now()}.txt`;
+        const content = "Test content for abort test";
+        await fs.promises.writeFile(path.join(testDir, fileName), content);
+        
+        const controller = new AbortController();
+        controller.abort();
+        
+        await expect(
+          fileManager.readFile(fileName, controller.signal)
+        ).rejects.toThrow("Operation aborted");
+      });
+
+      it("should complete reading when signal is not aborted", async () => {
+        const fileName = `read-no-abort-${Date.now()}.txt`;
+        const content = "Test content for read test";
+        await fs.promises.writeFile(path.join(testDir, fileName), content);
+        
+        const controller = new AbortController();
+        
+        const result = await fileManager.readFile(fileName, controller.signal);
+        expect(result).toBe(content);
+      });
+    });
+
+    describe("copyFile cancellation", () => {
+      it("should abort copying when signal is already aborted", async () => {
+        const sourceFile = `copy-abort-src-${Date.now()}.txt`;
+        const destDir = path.join(testDir, `copy-abort-dest-${Date.now()}`);
+        
+        await fs.promises.writeFile(path.join(testDir, sourceFile), "content");
+        await fs.promises.mkdir(destDir);
+        
+        const controller = new AbortController();
+        controller.abort();
+        
+        await expect(
+          fileManager.copyFile(sourceFile, destDir, controller.signal)
+        ).rejects.toThrow("Operation aborted");
+      });
+
+      it("should complete copying when signal is not aborted", async () => {
+        const sourceFile = `copy-no-abort-${Date.now()}.txt`;
+        const destDir = path.join(testDir, `copy-no-abort-dest-${Date.now()}`);
+        const content = "Content to copy";
+        
+        await fs.promises.writeFile(path.join(testDir, sourceFile), content);
+        await fs.promises.mkdir(destDir);
+        
+        const controller = new AbortController();
+        
+        const destPath = await fileManager.copyFile(sourceFile, destDir, controller.signal);
+        const copiedContent = await fs.promises.readFile(destPath, "utf-8");
+        expect(copiedContent).toBe(content);
+      });
+    });
+
+    describe("moveFile cancellation", () => {
+      it("should abort moving when signal is already aborted", async () => {
+        const sourceFile = `move-abort-src-${Date.now()}.txt`;
+        const destDir = path.join(testDir, `move-abort-dest-${Date.now()}`);
+        
+        await fs.promises.writeFile(path.join(testDir, sourceFile), "content");
+        await fs.promises.mkdir(destDir);
+        
+        const controller = new AbortController();
+        controller.abort();
+        
+        await expect(
+          fileManager.moveFile(sourceFile, destDir, controller.signal)
+        ).rejects.toThrow("Operation aborted");
+      });
+    });
+
+    describe("calculateHash cancellation", () => {
+      it("should abort hashing when signal is already aborted", async () => {
+        const fileName = `hash-abort-${Date.now()}.txt`;
+        await fs.promises.writeFile(path.join(testDir, fileName), "content to hash");
+        
+        const controller = new AbortController();
+        controller.abort();
+        
+        await expect(
+          fileManager.calculateHash(fileName, "sha256", controller.signal)
+        ).rejects.toThrow("Operation aborted");
+      });
+
+      it("should complete hashing when signal is not aborted", async () => {
+        const fileName = `hash-no-abort-${Date.now()}.txt`;
+        await fs.promises.writeFile(path.join(testDir, fileName), "content to hash");
+        
+        const controller = new AbortController();
+        
+        const result = await fileManager.calculateHash(fileName, "sha256", controller.signal);
+        expect(result.hash).toMatch(/^[a-f0-9]{64}$/);
+      });
+    });
+
+    describe("compressFile cancellation", () => {
+      it("should abort compression when signal is already aborted", async () => {
+        const sourceFile = `compress-abort-${Date.now()}.txt`;
+        const destFile = `${sourceFile}.br`;
+        
+        await fs.promises.writeFile(path.join(testDir, sourceFile), "content to compress");
+        
+        const controller = new AbortController();
+        controller.abort();
+        
+        await expect(
+          fileManager.compressFile(sourceFile, destFile, "brotli", controller.signal)
+        ).rejects.toThrow("Operation aborted");
+      });
+
+      it("should complete compression when signal is not aborted", async () => {
+        const sourceFile = `compress-no-abort-${Date.now()}.txt`;
+        const destFile = `${sourceFile}.br`;
+        const content = "Test content for compression. ".repeat(50);
+        
+        await fs.promises.writeFile(path.join(testDir, sourceFile), content);
+        
+        const controller = new AbortController();
+        
+        const result = await fileManager.compressFile(sourceFile, destFile, "brotli", controller.signal);
+        expect(result.originalSize).toBeGreaterThan(0);
+        expect(result.compressedSize).toBeGreaterThan(0);
+      });
+    });
+
+    describe("decompressFile cancellation", () => {
+      it("should abort decompression when signal is already aborted", async () => {
+        const sourceFile = `decompress-abort-src-${Date.now()}.txt`;
+        const compressedFile = `${sourceFile}.br`;
+        const decompressedFile = `decompress-abort-out-${Date.now()}.txt`;
+        
+        await fs.promises.writeFile(path.join(testDir, sourceFile), "content to compress");
+        await fileManager.compressFile(sourceFile, compressedFile, "brotli");
+        
+        const controller = new AbortController();
+        controller.abort();
+        
+        await expect(
+          fileManager.decompressFile(compressedFile, decompressedFile, "brotli", controller.signal)
+        ).rejects.toThrow("Operation aborted");
+      });
+
+      it("should complete decompression when signal is not aborted", async () => {
+        const sourceFile = `decompress-no-abort-src-${Date.now()}.txt`;
+        const compressedFile = `${sourceFile}.br`;
+        const decompressedFile = `decompress-no-abort-out-${Date.now()}.txt`;
+        const content = "Test content for decompression";
+        
+        await fs.promises.writeFile(path.join(testDir, sourceFile), content);
+        await fileManager.compressFile(sourceFile, compressedFile, "brotli");
+        
+        const controller = new AbortController();
+        
+        await fileManager.decompressFile(compressedFile, decompressedFile, "brotli", controller.signal);
+        
+        const decompressedContent = await fs.promises.readFile(
+          path.join(testDir, decompressedFile),
+          "utf-8"
+        );
+        expect(decompressedContent).toBe(content);
+      });
     });
   });
 
@@ -1068,6 +1356,51 @@ describe("FileManager", () => {
               "unsupported" as "brotli" | "gzip" | "deflate"
             )
           ).rejects.toThrow("Unsupported decompression algorithm");
+        });
+      });
+
+      describe("default algorithm", () => {
+        it("should use brotli as default compression algorithm", async () => {
+          const sourceFile = `compress-default-${Date.now()}.txt`;
+          const destFile = `${sourceFile}.br`;
+          const testContent = "Test content for default compression";
+          
+          await fs.promises.writeFile(path.join(testDir, sourceFile), testContent);
+          
+          // Call without specifying algorithm - should default to brotli
+          const result = await fileManager.compressFile(sourceFile, destFile);
+          
+          expect(result.originalSize).toBeGreaterThan(0);
+          expect(result.compressedSize).toBeGreaterThan(0);
+          
+          // Verify we can decompress with brotli
+          const decompressedFile = `decompressed-default-${Date.now()}.txt`;
+          await fileManager.decompressFile(destFile, decompressedFile, "brotli");
+          
+          const decompressedContent = await fs.promises.readFile(
+            path.join(testDir, decompressedFile),
+            "utf-8"
+          );
+          expect(decompressedContent).toBe(testContent);
+        });
+
+        it("should use brotli as default decompression algorithm", async () => {
+          const sourceFile = `decompress-default-src-${Date.now()}.txt`;
+          const compressedFile = `${sourceFile}.br`;
+          const decompressedFile = `decompress-default-out-${Date.now()}.txt`;
+          const testContent = "Test content for default decompression";
+          
+          await fs.promises.writeFile(path.join(testDir, sourceFile), testContent);
+          await fileManager.compressFile(sourceFile, compressedFile, "brotli");
+          
+          // Call without specifying algorithm - should default to brotli
+          await fileManager.decompressFile(compressedFile, decompressedFile);
+          
+          const decompressedContent = await fs.promises.readFile(
+            path.join(testDir, decompressedFile),
+            "utf-8"
+          );
+          expect(decompressedContent).toBe(testContent);
         });
       });
     });

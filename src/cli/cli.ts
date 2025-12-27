@@ -23,6 +23,10 @@ export class CLI {
   private rl: readline.Interface | null = null;
   private isRunning: boolean = false;
   private isPrompting: boolean = false;
+  private isExecutingCommand: boolean = false;
+  private currentAbortController: AbortController | null = null;
+  private lastCtrlCTime: number = 0;
+  private readonly DOUBLE_CTRL_C_THRESHOLD_MS: number = 1000;
 
   constructor(username: string = "Anonymous") {
     this.fileManager = new FileManager(username);
@@ -118,9 +122,9 @@ ${styles.dim("Type")} ${styles.command("'man'")} ${styles.dim("for help,")} ${st
       }
     });
 
-    // Handle Ctrl+C to exit gracefully
+    // Handle Ctrl+C with double-press detection
     this.rl.on("SIGINT", () => {
-      this.exit();
+      this.handleCtrlC();
     });
 
     // Update state when readline closes (only if not prompting)
@@ -182,8 +186,21 @@ ${styles.dim("Type")} ${styles.command("'man'")} ${styles.dim("for help,")} ${st
         }
       }
 
-      await this.registry.execute(command, args);
+      // Create AbortController for this command execution
+      this.currentAbortController = new AbortController();
+      this.isExecutingCommand = true;
+
+      try {
+        await this.registry.execute(command, args, this.currentAbortController.signal);
+      } finally {
+        this.isExecutingCommand = false;
+        this.currentAbortController = null;
+      }
     } catch (error) {
+      // Don't show error message for aborted operations
+      if (error instanceof Error && error.name === "AbortError") {
+        return;
+      }
       this.handleError(error);
     }
   }
@@ -226,6 +243,30 @@ ${styles.dim("Type")} ${styles.command("'man'")} ${styles.dim("for help,")} ${st
       console.error(`${styles.error("Error:")} ${error.message}`);
     } else {
       console.error(styles.error("An unknown error occurred."));
+    }
+  }
+
+  private handleCtrlC(): void {
+    const now = Date.now();
+    const timeSinceLastCtrlC = now - this.lastCtrlCTime;
+
+    if (timeSinceLastCtrlC < this.DOUBLE_CTRL_C_THRESHOLD_MS) {
+      // Double Ctrl+C detected - exit the application
+      this.exit();
+    } else {
+      // First Ctrl+C - interrupt current task or show hint
+      this.lastCtrlCTime = now;
+
+      if (this.isExecutingCommand && this.currentAbortController) {
+        // Abort the currently running command
+        // Don't show prompt here - handleInput will show it after catching AbortError
+        this.currentAbortController.abort();
+        console.log("\n" + MESSAGES.info.taskInterrupted);
+      } else {
+        // No command running, just show hint for exiting
+        // Don't show prompt - wait for user to either press Ctrl+C again or type a command
+        console.log("\n" + MESSAGES.info.interruptHint);
+      }
     }
   }
 

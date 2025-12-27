@@ -48,14 +48,14 @@ export class CommandRegistry {
     return this.commands.has(actualName);
   }
 
-  async execute(name: string, args: string[]): Promise<void> {
+  async execute(name: string, args: string[], signal?: AbortSignal): Promise<void> {
     const command = this.get(name);
 
     if (!command) {
       throw new Error(`Unknown command: ${name}`);
     }
 
-    await command.handler(args);
+    await command.handler(args, signal);
   }
 
   requiresConfirmation(name: string): boolean {
