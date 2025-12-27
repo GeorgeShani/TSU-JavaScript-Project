@@ -142,8 +142,7 @@ ${styles.dim("Type")} ${styles.command("'man'")} ${styles.dim("for help,")} ${st
         if (key && key.ctrl && key.name === "l" && !this.isPrompting) {
           // Clear line first to avoid visual artifacts
           process.stdout.write("\x1b[2J\x1b[H");
-          printCurrentDir();
-          this.rl?.prompt();
+          this.showPrompt();
         }
       });
     }
