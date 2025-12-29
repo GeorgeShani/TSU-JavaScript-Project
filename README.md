@@ -185,23 +185,30 @@ Calculate cryptographic hashes of files.
 
 ### Compression Commands
 
-Compress and decompress files using various algorithms.
+Compress and decompress files and folders using various algorithms.
 
 | Command | Description |
 |---------|-------------|
-| `compress <source> <dest> [algorithm]` | Compress a file (default: brotli) |
-| `decompress <source> <dest> [algorithm]` | Decompress a file (auto-detects algorithm) |
+| `compress <source> <dest> [algorithm]` | Compress a file or folder (default: brotli) |
+| `decompress <source> <dest> [algorithm]` | Decompress a file or folder archive (auto-detects algorithm) |
 | `brotli <source> <dest>` | Compress using Brotli algorithm |
 | `gzip <source> <dest>` | Compress using Gzip algorithm |
 | `deflate <source> <dest>` | Compress using Deflate algorithm |
-| `unbrotli <source> <dest>` | Decompress a Brotli file |
-| `gunzip <source> <dest>` | Decompress a Gzip file |
-| `inflate <source> <dest>` | Decompress a Deflate file |
+| `unbrotli <source> <dest>` | Decompress a Brotli file or folder archive |
+| `gunzip <source> <dest>` | Decompress a Gzip file or folder archive |
+| `inflate <source> <dest>` | Decompress a Deflate file or folder archive |
 
 **Supported Algorithms:**
 - **Brotli** (`.br`) - Best compression ratio, slower
 - **Gzip** (`.gz`) - Good balance of speed and compression
 - **Deflate** (`.zz`) - Fast compression, moderate ratio
+
+**Folder Compression:**
+
+All compression commands support both files and folders. When compressing a folder:
+- All files within the folder (including subdirectories) are collected
+- Files are archived into a single compressed file preserving directory structure
+- When decompressing, the folder structure is automatically restored
 
 **Example:**
 ```
@@ -209,6 +216,12 @@ Compress and decompress files using various algorithms.
 > gzip document.txt document.txt.gz
 > decompress archive.gz extracted.txt
 > gunzip archive.gz output.txt
+
+# Folder compression examples
+> compress myfolder myfolder.br
+> gzip projectdir projectdir.gz
+> decompress myfolder.br restored_folder
+> gunzip projectdir.gz extracted_project
 ```
 
 ---
