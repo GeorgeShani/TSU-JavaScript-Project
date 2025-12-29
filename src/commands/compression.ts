@@ -8,6 +8,8 @@ import {
   DEFAULT_COMPRESSION_ALGORITHM,
   COMPRESSION,
 } from "../constants/index.js";
+import { directoryExists, fileExists } from "../utils/validation.js";
+import { resolveFilePath } from "../utils/path.js";
 
 type CompressionAlgorithm = "brotli" | "gzip" | "deflate";
 
@@ -16,12 +18,12 @@ export const registerCompressionCommands = (
   fileManager: FileManager
 ): void => {
   const compressDoc: CommandDoc = {
-    description: "Compress a file",
+    description: "Compress a file or folder",
     syntax: "compress <source> <destination> [algorithm]",
     example: "compress large.txt large.txt.gz gzip",
     details:
-      `Compresses a file using the specified algorithm and saves ` +
-      `the result to the destination. ` +
+      `Compresses a file or folder using the specified algorithm and saves ` +
+      `the result to the destination. Folders are archived and compressed together. ` +
       `Supported algorithms: ${COMPRESSION_ALGORITHMS.join(", ")}. ` +
       `Default: ${DEFAULT_COMPRESSION_ALGORITHM}.`,
     category: "compression",
@@ -45,30 +47,57 @@ export const registerCompressionCommands = (
       );
     }
 
-    console.log(
-      `${styles.info("Compressing")} ${styles.path(sourcePath)} ${styles.dim("using")} ${styles.highlight(algorithm)}...`
-    );
+    const resolvedSource = resolveFilePath(sourcePath);
+    const isDirectory = await directoryExists(resolvedSource);
+    const isFile = await fileExists(resolvedSource);
 
-    const result = await fileManager.compressFile(sourcePath, destPath, algorithm, signal);
+    if (!isDirectory && !isFile) {
+      throw new Error(MESSAGES.errors.fileNotFound(sourcePath));
+    }
 
-    const ratio = ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1);
+    if (isDirectory) {
+      console.log(
+        `${styles.info("Compressing folder")} ${styles.path(sourcePath)} ${styles.dim("using")} ${styles.highlight(algorithm)}...`
+      );
 
-    console.log(MESSAGES.success.compressed(sourcePath, destPath));
-    console.log(
-      `${styles.dim("Original:")} ${styles.size(formatBytes(result.originalSize))} ${styles.dim("->")} ` +
-      `${styles.dim("Compressed:")} ${styles.size(formatBytes(result.compressedSize))} ` +
-      `${styles.dim("(")}${styles.success(ratio + "% saved")}${styles.dim(")")}`
-    );
+      const result = await fileManager.compressFolder(sourcePath, destPath, algorithm, signal);
+      const ratio = result.originalSize > 0 
+        ? ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1)
+        : "0.0";
+
+      console.log(MESSAGES.success.compressed(sourcePath, destPath));
+      console.log(
+        `${styles.dim("Files:")} ${styles.highlight(result.fileCount.toString())} ${styles.dim("|")} ` +
+        `${styles.dim("Original:")} ${styles.size(formatBytes(result.originalSize))} ${styles.dim("->")} ` +
+        `${styles.dim("Compressed:")} ${styles.size(formatBytes(result.compressedSize))} ` +
+        `${styles.dim("(")}${styles.success(ratio + "% saved")}${styles.dim(")")}`
+      );
+    } else {
+      console.log(
+        `${styles.info("Compressing")} ${styles.path(sourcePath)} ${styles.dim("using")} ${styles.highlight(algorithm)}...`
+      );
+
+      const result = await fileManager.compressFile(sourcePath, destPath, algorithm, signal);
+      const ratio = ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1);
+
+      console.log(MESSAGES.success.compressed(sourcePath, destPath));
+      console.log(
+        `${styles.dim("Original:")} ${styles.size(formatBytes(result.originalSize))} ${styles.dim("->")} ` +
+        `${styles.dim("Compressed:")} ${styles.size(formatBytes(result.compressedSize))} ` +
+        `${styles.dim("(")}${styles.success(ratio + "% saved")}${styles.dim(")")}`
+      );
+    }
   };
 
   registry.register("compress", compressHandler, compressDoc);
 
   const decompressDoc: CommandDoc = {
-    description: "Decompress a compressed file",
+    description: "Decompress a compressed file or folder archive",
     syntax: "decompress <source> <destination> [algorithm]",
     example: "decompress large.txt.gz large.txt gzip",
     details:
-      `Decompresses a file and writes the output to the destination. ` +
+      `Decompresses a file or folder archive and writes the output to the destination. ` +
+      `If the source is a folder archive, it will be extracted to a directory. ` +
       `If algorithm is not specified, it will be detected from the file extension. ` +
       `Supported: ${COMPRESSION_ALGORITHMS.join(", ")}.`,
     category: "compression",
@@ -106,21 +135,34 @@ export const registerCompressionCommands = (
       );
     }
 
-    console.log(
-      `${styles.info("Decompressing")} ${styles.path(sourcePath)} ${styles.dim("using")} ${styles.highlight(algorithm)}...`
-    );
+    // Check if the source is a folder archive
+    const isFolderArchive = await fileManager.isFolderArchive(sourcePath, algorithm);
 
-    await fileManager.decompressFile(sourcePath, destPath, algorithm, signal);
-    console.log(MESSAGES.success.decompressed(sourcePath, destPath));
+    if (isFolderArchive) {
+      console.log(
+        `${styles.info("Extracting folder archive")} ${styles.path(sourcePath)} ${styles.dim("using")} ${styles.highlight(algorithm)}...`
+      );
+
+      const result = await fileManager.decompressFolder(sourcePath, destPath, algorithm, signal);
+      console.log(MESSAGES.success.decompressed(sourcePath, destPath));
+      console.log(`${styles.dim("Extracted")} ${styles.highlight(result.fileCount.toString())} ${styles.dim("files")}`);
+    } else {
+      console.log(
+        `${styles.info("Decompressing")} ${styles.path(sourcePath)} ${styles.dim("using")} ${styles.highlight(algorithm)}...`
+      );
+
+      await fileManager.decompressFile(sourcePath, destPath, algorithm, signal);
+      console.log(MESSAGES.success.decompressed(sourcePath, destPath));
+    }
   };
 
   registry.register("decompress", decompressHandler, decompressDoc);
 
   const brotliDoc: CommandDoc = {
-    description: "Compress using Brotli algorithm",
+    description: "Compress file or folder using Brotli algorithm",
     syntax: "brotli <source> <destination>",
     example: "brotli file.txt file.txt.br",
-    details: COMPRESSION.brotli.description,
+    details: COMPRESSION.brotli.description + " Supports both files and folders.",
     category: "compression",
   };
 
@@ -128,22 +170,38 @@ export const registerCompressionCommands = (
     if (!args[0]) throw new Error(MESSAGES.errors.missingArgument("source path"));
     if (!args[1]) throw new Error(MESSAGES.errors.missingArgument("destination path"));
 
-    console.log(`${styles.info("Compressing with Brotli")} ${styles.path(args[0])}...`);
-    const result = await fileManager.compressFile(args[0], args[1], "brotli", signal);
-    const ratio = ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1);
-    console.log(
-      `${styles.success("Done!")} ${styles.size(formatBytes(result.originalSize))} -> ` +
-      `${styles.size(formatBytes(result.compressedSize))} (${styles.highlight(ratio + "% saved")})`
-    );
+    const resolvedSource = resolveFilePath(args[0]);
+    const isDirectory = await directoryExists(resolvedSource);
+
+    if (isDirectory) {
+      console.log(`${styles.info("Compressing folder with Brotli")} ${styles.path(args[0])}...`);
+      const result = await fileManager.compressFolder(args[0], args[1], "brotli", signal);
+      const ratio = result.originalSize > 0 
+        ? ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1)
+        : "0.0";
+      console.log(
+        `${styles.success("Done!")} ${styles.highlight(result.fileCount.toString())} files | ` +
+        `${styles.size(formatBytes(result.originalSize))} -> ` +
+        `${styles.size(formatBytes(result.compressedSize))} (${styles.highlight(ratio + "% saved")})`
+      );
+    } else {
+      console.log(`${styles.info("Compressing with Brotli")} ${styles.path(args[0])}...`);
+      const result = await fileManager.compressFile(args[0], args[1], "brotli", signal);
+      const ratio = ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1);
+      console.log(
+        `${styles.success("Done!")} ${styles.size(formatBytes(result.originalSize))} -> ` +
+        `${styles.size(formatBytes(result.compressedSize))} (${styles.highlight(ratio + "% saved")})`
+      );
+    }
   };
 
   registry.register("brotli", brotliHandler, brotliDoc);
 
   const gzipDoc: CommandDoc = {
-    description: "Compress using Gzip algorithm",
+    description: "Compress file or folder using Gzip algorithm",
     syntax: "gzip <source> <destination>",
     example: "gzip file.txt file.txt.gz",
-    details: COMPRESSION.gzip.description,
+    details: COMPRESSION.gzip.description + " Supports both files and folders.",
     category: "compression",
   };
 
@@ -151,22 +209,38 @@ export const registerCompressionCommands = (
     if (!args[0]) throw new Error(MESSAGES.errors.missingArgument("source path"));
     if (!args[1]) throw new Error(MESSAGES.errors.missingArgument("destination path"));
 
-    console.log(`${styles.info("Compressing with Gzip")} ${styles.path(args[0])}...`);
-    const result = await fileManager.compressFile(args[0], args[1], "gzip", signal);
-    const ratio = ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1);
-    console.log(
-      `${styles.success("Done!")} ${styles.size(formatBytes(result.originalSize))} -> ` +
-      `${styles.size(formatBytes(result.compressedSize))} (${styles.highlight(ratio + "% saved")})`
-    );
+    const resolvedSource = resolveFilePath(args[0]);
+    const isDirectory = await directoryExists(resolvedSource);
+
+    if (isDirectory) {
+      console.log(`${styles.info("Compressing folder with Gzip")} ${styles.path(args[0])}...`);
+      const result = await fileManager.compressFolder(args[0], args[1], "gzip", signal);
+      const ratio = result.originalSize > 0 
+        ? ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1)
+        : "0.0";
+      console.log(
+        `${styles.success("Done!")} ${styles.highlight(result.fileCount.toString())} files | ` +
+        `${styles.size(formatBytes(result.originalSize))} -> ` +
+        `${styles.size(formatBytes(result.compressedSize))} (${styles.highlight(ratio + "% saved")})`
+      );
+    } else {
+      console.log(`${styles.info("Compressing with Gzip")} ${styles.path(args[0])}...`);
+      const result = await fileManager.compressFile(args[0], args[1], "gzip", signal);
+      const ratio = ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1);
+      console.log(
+        `${styles.success("Done!")} ${styles.size(formatBytes(result.originalSize))} -> ` +
+        `${styles.size(formatBytes(result.compressedSize))} (${styles.highlight(ratio + "% saved")})`
+      );
+    }
   };
 
   registry.register("gzip", gzipHandler, gzipDoc);
 
   const deflateDoc: CommandDoc = {
-    description: "Compress using Deflate algorithm",
+    description: "Compress file or folder using Deflate algorithm",
     syntax: "deflate <source> <destination>",
     example: "deflate file.txt file.txt.zz",
-    details: COMPRESSION.deflate.description,
+    details: COMPRESSION.deflate.description + " Supports both files and folders.",
     category: "compression",
   };
 
@@ -174,22 +248,38 @@ export const registerCompressionCommands = (
     if (!args[0]) throw new Error(MESSAGES.errors.missingArgument("source path"));
     if (!args[1]) throw new Error(MESSAGES.errors.missingArgument("destination path"));
 
-    console.log(`${styles.info("Compressing with Deflate")} ${styles.path(args[0])}...`);
-    const result = await fileManager.compressFile(args[0], args[1], "deflate", signal);
-    const ratio = ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1);
-    console.log(
-      `${styles.success("Done!")} ${styles.size(formatBytes(result.originalSize))} -> ` +
-      `${styles.size(formatBytes(result.compressedSize))} (${styles.highlight(ratio + "% saved")})`
-    );
+    const resolvedSource = resolveFilePath(args[0]);
+    const isDirectory = await directoryExists(resolvedSource);
+
+    if (isDirectory) {
+      console.log(`${styles.info("Compressing folder with Deflate")} ${styles.path(args[0])}...`);
+      const result = await fileManager.compressFolder(args[0], args[1], "deflate", signal);
+      const ratio = result.originalSize > 0 
+        ? ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1)
+        : "0.0";
+      console.log(
+        `${styles.success("Done!")} ${styles.highlight(result.fileCount.toString())} files | ` +
+        `${styles.size(formatBytes(result.originalSize))} -> ` +
+        `${styles.size(formatBytes(result.compressedSize))} (${styles.highlight(ratio + "% saved")})`
+      );
+    } else {
+      console.log(`${styles.info("Compressing with Deflate")} ${styles.path(args[0])}...`);
+      const result = await fileManager.compressFile(args[0], args[1], "deflate", signal);
+      const ratio = ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1);
+      console.log(
+        `${styles.success("Done!")} ${styles.size(formatBytes(result.originalSize))} -> ` +
+        `${styles.size(formatBytes(result.compressedSize))} (${styles.highlight(ratio + "% saved")})`
+      );
+    }
   };
 
   registry.register("deflate", deflateHandler, deflateDoc);
 
   const gunzipDoc: CommandDoc = {
-    description: "Decompress a Gzip file",
+    description: "Decompress a Gzip file or folder archive",
     syntax: "gunzip <source> <destination>",
     example: "gunzip file.txt.gz file.txt",
-    details: "Decompresses a Gzip-compressed file (.gz extension).",
+    details: "Decompresses a Gzip-compressed file or folder archive (.gz extension).",
     category: "compression",
   };
 
@@ -197,18 +287,27 @@ export const registerCompressionCommands = (
     if (!args[0]) throw new Error(MESSAGES.errors.missingArgument("source path"));
     if (!args[1]) throw new Error(MESSAGES.errors.missingArgument("destination path"));
 
-    console.log(`${styles.info("Decompressing Gzip")} ${styles.path(args[0])}...`);
-    await fileManager.decompressFile(args[0], args[1], "gzip", signal);
-    console.log(MESSAGES.success.decompressed(args[0], args[1]));
+    const isFolderArchive = await fileManager.isFolderArchive(args[0], "gzip");
+
+    if (isFolderArchive) {
+      console.log(`${styles.info("Extracting Gzip folder archive")} ${styles.path(args[0])}...`);
+      const result = await fileManager.decompressFolder(args[0], args[1], "gzip", signal);
+      console.log(MESSAGES.success.decompressed(args[0], args[1]));
+      console.log(`${styles.dim("Extracted")} ${styles.highlight(result.fileCount.toString())} ${styles.dim("files")}`);
+    } else {
+      console.log(`${styles.info("Decompressing Gzip")} ${styles.path(args[0])}...`);
+      await fileManager.decompressFile(args[0], args[1], "gzip", signal);
+      console.log(MESSAGES.success.decompressed(args[0], args[1]));
+    }
   };
 
   registry.register("gunzip", gunzipHandler, gunzipDoc);
 
   const unbrotliDoc: CommandDoc = {
-    description: "Decompress a Brotli file",
+    description: "Decompress a Brotli file or folder archive",
     syntax: "unbrotli <source> <destination>",
     example: "unbrotli file.txt.br file.txt",
-    details: "Decompresses a Brotli-compressed file (.br extension).",
+    details: "Decompresses a Brotli-compressed file or folder archive (.br extension).",
     category: "compression",
   };
 
@@ -216,18 +315,27 @@ export const registerCompressionCommands = (
     if (!args[0]) throw new Error(MESSAGES.errors.missingArgument("source path"));
     if (!args[1]) throw new Error(MESSAGES.errors.missingArgument("destination path"));
 
-    console.log(`${styles.info("Decompressing Brotli")} ${styles.path(args[0])}...`);
-    await fileManager.decompressFile(args[0], args[1], "brotli", signal);
-    console.log(MESSAGES.success.decompressed(args[0], args[1]));
+    const isFolderArchive = await fileManager.isFolderArchive(args[0], "brotli");
+
+    if (isFolderArchive) {
+      console.log(`${styles.info("Extracting Brotli folder archive")} ${styles.path(args[0])}...`);
+      const result = await fileManager.decompressFolder(args[0], args[1], "brotli", signal);
+      console.log(MESSAGES.success.decompressed(args[0], args[1]));
+      console.log(`${styles.dim("Extracted")} ${styles.highlight(result.fileCount.toString())} ${styles.dim("files")}`);
+    } else {
+      console.log(`${styles.info("Decompressing Brotli")} ${styles.path(args[0])}...`);
+      await fileManager.decompressFile(args[0], args[1], "brotli", signal);
+      console.log(MESSAGES.success.decompressed(args[0], args[1]));
+    }
   };
 
   registry.register("unbrotli", unbrotliHandler, unbrotliDoc);
 
   const inflateDoc: CommandDoc = {
-    description: "Decompress a Deflate file",
+    description: "Decompress a Deflate file or folder archive",
     syntax: "inflate <source> <destination>",
     example: "inflate file.txt.zz file.txt",
-    details: "Decompresses a Deflate-compressed file (.zz extension).",
+    details: "Decompresses a Deflate-compressed file or folder archive (.zz extension).",
     category: "compression",
   };
 
@@ -235,9 +343,18 @@ export const registerCompressionCommands = (
     if (!args[0]) throw new Error(MESSAGES.errors.missingArgument("source path"));
     if (!args[1]) throw new Error(MESSAGES.errors.missingArgument("destination path"));
 
-    console.log(`${styles.info("Decompressing Deflate")} ${styles.path(args[0])}...`);
-    await fileManager.decompressFile(args[0], args[1], "deflate", signal);
-    console.log(MESSAGES.success.decompressed(args[0], args[1]));
+    const isFolderArchive = await fileManager.isFolderArchive(args[0], "deflate");
+
+    if (isFolderArchive) {
+      console.log(`${styles.info("Extracting Deflate folder archive")} ${styles.path(args[0])}...`);
+      const result = await fileManager.decompressFolder(args[0], args[1], "deflate", signal);
+      console.log(MESSAGES.success.decompressed(args[0], args[1]));
+      console.log(`${styles.dim("Extracted")} ${styles.highlight(result.fileCount.toString())} ${styles.dim("files")}`);
+    } else {
+      console.log(`${styles.info("Decompressing Deflate")} ${styles.path(args[0])}...`);
+      await fileManager.decompressFile(args[0], args[1], "deflate", signal);
+      console.log(MESSAGES.success.decompressed(args[0], args[1]));
+    }
   };
 
   registry.register("inflate", inflateHandler, inflateDoc);

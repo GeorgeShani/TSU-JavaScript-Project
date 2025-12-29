@@ -12,6 +12,7 @@ import {
   createInflate,
 } from "zlib";
 import crypto from "crypto";
+import { Readable, Transform } from "stream";
 
 import {
   resolveFilePath,
@@ -534,12 +535,22 @@ export class FileManager {
     destPath: string,
     algorithm: "brotli" | "gzip" | "deflate" = "brotli",
     signal?: AbortSignal
-  ): Promise<{ originalSize: number; compressedSize: number }> {
+  ): Promise<{ originalSize: number; compressedSize: number; fileCount?: number }> {
     const resolvedSource = resolveFilePath(sourcePath);
     const resolvedDest = resolveFilePath(destPath);
 
     if (signal?.aborted) {
       throw new DOMException("Operation aborted", "AbortError");
+    }
+
+    // Check if source is a directory - if so, use folder compression
+    if (await directoryExists(resolvedSource)) {
+      const result = await this.compressFolder(sourcePath, destPath, algorithm, signal);
+      return {
+        originalSize: result.originalSize,
+        compressedSize: result.compressedSize,
+        fileCount: result.fileCount,
+      };
     }
 
     if (!(await fileExists(resolvedSource))) {
@@ -594,7 +605,7 @@ export class FileManager {
     destPath: string,
     algorithm: "brotli" | "gzip" | "deflate" = "brotli",
     signal?: AbortSignal
-  ): Promise<void> {
+  ): Promise<{ fileCount?: number }> {
     const resolvedSource = resolveFilePath(sourcePath);
     const resolvedDest = resolveFilePath(destPath);
 
@@ -604,6 +615,12 @@ export class FileManager {
 
     if (!(await fileExists(resolvedSource))) {
       throw new Error(MESSAGES.errors.fileNotFound(sourcePath));
+    }
+
+    // Check if source is a folder archive - if so, use folder decompression
+    if (await this.isFolderArchive(sourcePath, algorithm)) {
+      const result = await this.decompressFolder(sourcePath, destPath, algorithm, signal);
+      return { fileCount: result.fileCount };
     }
 
     // Get appropriate decompression transform stream
@@ -639,6 +656,8 @@ export class FileManager {
     } else {
       await pipeline(readStream, decompressionStream, writeStream);
     }
+
+    return {};
   }
 
   // Factory method for compression streams
@@ -697,6 +716,280 @@ export class FileManager {
       default:
         return ".compressed";
     }
+  }
+
+  /**
+   * Compress a folder into an archive file
+   * Uses a simple custom archive format: [header][file entries]
+   * Each file entry: [path length (4 bytes)][path][size (8 bytes)][content]
+   */
+  async compressFolder(
+    sourcePath: string,
+    destPath: string,
+    algorithm: "brotli" | "gzip" | "deflate" = "brotli",
+    signal?: AbortSignal
+  ): Promise<{ originalSize: number; compressedSize: number; fileCount: number }> {
+    const resolvedSource = resolveFilePath(sourcePath);
+    const resolvedDest = resolveFilePath(destPath);
+
+    if (signal?.aborted) {
+      throw new DOMException("Operation aborted", "AbortError");
+    }
+
+    if (!(await directoryExists(resolvedSource))) {
+      throw new Error(MESSAGES.errors.directoryNotFound(sourcePath));
+    }
+
+    // Collect all files in the folder
+    const files = await this.collectFilesRecursive(resolvedSource, resolvedSource, signal);
+    
+    let originalSize = 0;
+    for (const file of files) {
+      originalSize += file.size;
+    }
+
+    // Create archive buffer
+    const archiveChunks: Buffer[] = [];
+    
+    // Write magic header to identify folder archives
+    const magicHeader = Buffer.from("FMARCH01"); // File Manager Archive v01
+    archiveChunks.push(magicHeader);
+    
+    // Write file count
+    const fileCountBuf = Buffer.alloc(4);
+    fileCountBuf.writeUInt32BE(files.length, 0);
+    archiveChunks.push(fileCountBuf);
+
+    // Write each file entry
+    for (const file of files) {
+      if (signal?.aborted) {
+        throw new DOMException("Operation aborted", "AbortError");
+      }
+
+      // Relative path length and content
+      const relPathBuf = Buffer.from(file.relativePath, "utf-8");
+      const pathLenBuf = Buffer.alloc(4);
+      pathLenBuf.writeUInt32BE(relPathBuf.length, 0);
+      archiveChunks.push(pathLenBuf);
+      archiveChunks.push(relPathBuf);
+
+      // File size
+      const sizeBuf = Buffer.alloc(8);
+      sizeBuf.writeBigUInt64BE(BigInt(file.size), 0);
+      archiveChunks.push(sizeBuf);
+
+      // File content
+      const content = await fs.promises.readFile(file.fullPath);
+      archiveChunks.push(content);
+    }
+
+    const archiveBuffer = Buffer.concat(archiveChunks);
+
+    // Compress the archive
+    const compressionStream = this.createCompressionStream(algorithm);
+    const writeStream = createWriteStream(resolvedDest);
+
+    // Create readable stream from buffer
+    const readable = Readable.from(archiveBuffer);
+
+    if (signal) {
+      const onAbort = () => {
+        readable.destroy();
+        writeStream.destroy();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+
+      try {
+        await pipeline(readable, compressionStream, writeStream, { signal });
+      } catch (error) {
+        if (signal.aborted) {
+          try {
+            await fs.promises.unlink(resolvedDest);
+          } catch {
+            // Ignore cleanup errors
+          }
+          throw new DOMException("Operation aborted", "AbortError");
+        }
+        throw error;
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+      }
+    } else {
+      await pipeline(readable, compressionStream, writeStream);
+    }
+
+    const destStats = await fs.promises.stat(resolvedDest);
+    
+    return {
+      originalSize,
+      compressedSize: destStats.size,
+      fileCount: files.length,
+    };
+  }
+
+  /**
+   * Decompress a folder archive back to a directory
+   */
+  async decompressFolder(
+    sourcePath: string,
+    destPath: string,
+    algorithm: "brotli" | "gzip" | "deflate" = "brotli",
+    signal?: AbortSignal
+  ): Promise<{ fileCount: number }> {
+    const resolvedSource = resolveFilePath(sourcePath);
+    const resolvedDest = resolveFilePath(destPath);
+
+    if (signal?.aborted) {
+      throw new DOMException("Operation aborted", "AbortError");
+    }
+
+    if (!(await fileExists(resolvedSource))) {
+      throw new Error(MESSAGES.errors.fileNotFound(sourcePath));
+    }
+
+    // Read and decompress the archive
+    const compressedData = await fs.promises.readFile(resolvedSource);
+    const decompressedData = await this.decompressBuffer(compressedData, algorithm);
+
+    // Verify magic header
+    const magicHeader = decompressedData.subarray(0, 8).toString();
+    if (magicHeader !== "FMARCH01") {
+      throw new Error("Invalid archive format or not a folder archive");
+    }
+
+    let offset = 8;
+
+    // Read file count
+    const fileCount = decompressedData.readUInt32BE(offset);
+    offset += 4;
+
+    // Create destination directory
+    await fs.promises.mkdir(resolvedDest, { recursive: true });
+
+    // Extract each file
+    for (let i = 0; i < fileCount; i++) {
+      if (signal?.aborted) {
+        throw new DOMException("Operation aborted", "AbortError");
+      }
+
+      // Read path length and path
+      const pathLen = decompressedData.readUInt32BE(offset);
+      offset += 4;
+      const relativePath = decompressedData.subarray(offset, offset + pathLen).toString("utf-8");
+      offset += pathLen;
+
+      // Read file size
+      const fileSize = Number(decompressedData.readBigUInt64BE(offset));
+      offset += 8;
+
+      // Read file content
+      const content = decompressedData.subarray(offset, offset + fileSize);
+      offset += fileSize;
+
+      // Create file path (normalize to current OS path separator)
+      const filePath = path.join(resolvedDest, relativePath.split("/").join(path.sep));
+      const fileDir = path.dirname(filePath);
+
+      // Ensure directory exists
+      await fs.promises.mkdir(fileDir, { recursive: true });
+
+      // Write file
+      await fs.promises.writeFile(filePath, content);
+    }
+
+    return { fileCount };
+  }
+
+  /**
+   * Check if a compressed file is a folder archive
+   */
+  async isFolderArchive(
+    filePath: string,
+    algorithm: "brotli" | "gzip" | "deflate"
+  ): Promise<boolean> {
+    const resolvedPath = resolveFilePath(filePath);
+
+    if (!(await fileExists(resolvedPath))) {
+      return false;
+    }
+
+    try {
+      const compressedData = await fs.promises.readFile(resolvedPath);
+      const decompressedData = await this.decompressBuffer(compressedData, algorithm);
+      const magicHeader = decompressedData.subarray(0, 8).toString();
+      return magicHeader === "FMARCH01";
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Collect all files in a directory recursively
+   */
+  private async collectFilesRecursive(
+    basePath: string,
+    currentPath: string,
+    signal?: AbortSignal
+  ): Promise<Array<{ fullPath: string; relativePath: string; size: number }>> {
+    const files: Array<{ fullPath: string; relativePath: string; size: number }> = [];
+
+    if (signal?.aborted) {
+      throw new DOMException("Operation aborted", "AbortError");
+    }
+
+    const entries = await fs.promises.readdir(currentPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (signal?.aborted) {
+        throw new DOMException("Operation aborted", "AbortError");
+      }
+
+      const fullPath = path.join(currentPath, entry.name);
+      // Use forward slashes for cross-platform compatibility in archives
+      const relativePath = path.relative(basePath, fullPath).split(path.sep).join("/");
+
+      if (entry.isFile()) {
+        const stats = await fs.promises.stat(fullPath);
+        files.push({
+          fullPath,
+          relativePath,
+          size: stats.size,
+        });
+      } else if (entry.isDirectory()) {
+        const subFiles = await this.collectFilesRecursive(basePath, fullPath, signal);
+        files.push(...subFiles);
+      }
+    }
+
+    return files;
+  }
+
+  /**
+   * Decompress a buffer using the specified algorithm
+   */
+  private async decompressBuffer(
+    data: Buffer,
+    algorithm: "brotli" | "gzip" | "deflate"
+  ): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      const decompressStream = this.createDecompressionStream(algorithm);
+
+      decompressStream.on("data", (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+
+      decompressStream.on("end", () => {
+        resolve(Buffer.concat(chunks));
+      });
+
+      decompressStream.on("error", (err) => {
+        reject(err);
+      });
+
+      decompressStream.write(data);
+      decompressStream.end();
+    });
   }
 
   getOSInfo(flag: string): string {
